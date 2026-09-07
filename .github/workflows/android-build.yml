@@ -5,9 +5,8 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:   # cho phép bấm "Run workflow" thủ công trên GitHub
+  workflow_dispatch:
 
-# Cho phép tạo GitHub Release đính kèm APK
 permissions:
   contents: write
 
@@ -15,8 +14,6 @@ jobs:
   build:
     name: Build & Sign APK
     runs-on: ubuntu-latest
-    # 'if' không được đọc trực tiếp từ 'secrets', nên đưa secret vào 'env' cấp
-    # job trước, rồi các step bên dưới kiểm tra qua 'env' thay vì 'secrets'.
     env:
       HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
       HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
@@ -25,27 +22,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- BƯỚC CẢI TIẾN: Giải nén và tự động chuẩn hóa cấu trúc thư mục ---
-      - name: Extract ZIP files and fix directory structure
+      # Giải nén và chuyển mã nguồn về thư mục gốc
+      - name: Extract ZIP and flatten directory structure
         run: |
-          find . -name "*.zip" | while read -r file; do
+          find . -maxdepth 2 -name "*.zip" | while read -r file; do
             echo "Đang giải nén: $file..."
             unzip -o "$file" -d "$(dirname "$file")"
           done
+
+          SETTINGS_FILE=$(find . -mindepth 2 -name "settings.gradle.kts" -o -name "settings.gradle" | head -n 1)
           
-          # Tìm thư mục thực sự chứa dự án Android (chứa file build.gradle)
-          GRADLE_DIR=$(dirname "$(find . -name "build.gradle" -o -name "build.gradle.kts" | head -n 1)")
-          
-          # Nếu tìm thấy mã nguồn nằm trong thư mục con, di chuyển tất cả ra thư mục gốc
-          if [ -n "$GRADLE_DIR" ] && [ "$GRADLE_DIR" != "." ]; then
-            echo "Phát hiện mã nguồn bị lồng trong thư mục con: $GRADLE_DIR"
-            echo "Đang di chuyển toàn bộ file ra thư mục gốc..."
-            # Di chuyển cả file thường và file ẩn (như .git, .gradle)
-            mv "$GRADLE_DIR"/* "$GRADLE_DIR"/.* . 2>/dev/null || true
-          else
-            echo "Cấu trúc thư mục đã chuẩn, không cần di chuyển."
+          if [ -n "$SETTINGS_FILE" ]; then
+            TARGET_DIR=$(dirname "$SETTINGS_FILE")
+            shopt -s dotglob
+            mv "$TARGET_DIR"/* . 2>/dev/null || true
+            rm -rf "$TARGET_DIR"
+            shopt -u dotglob
           fi
-      # ----------------------------------------------------------------------
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -53,16 +46,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Repo không có sẵn gradlew, action này sẽ tự cài đúng phiên bản
-      # Gradle được khai báo trong gradle/wrapper/gradle-wrapper.properties
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: wrapper
 
-      # Chỉ tạo file .env khi thực sự có secret GEMINI_API_KEY.
-      # Nếu không có, KHÔNG tạo file này — để plugin tự fallback sang
-      # .env.example (key bị comment sẵn), tránh sinh BuildConfig rỗng gây lỗi build.
       - name: Create .env file
         if: ${{ env.HAS_GEMINI_KEY == 'true' }}
         env:
@@ -76,8 +64,6 @@ jobs:
         run: |
           echo "$KEYSTORE_BASE64" | base64 --decode > "${{ github.workspace }}/my-upload-key.jks"
 
-      # Build luôn dùng signingConfig "debugConfig", tự tạo debug.keystore
-      # tại chỗ vì file này không được commit vào repo (nằm trong .gitignore)
       - name: Generate debug keystore
         run: |
           keytool -genkeypair -v \
@@ -90,13 +76,13 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
+      # Tìm và tải lên toàn bộ file .apk xuất ra
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: "**/build/outputs/apk/debug/*.apk"
 
-      # Chỉ build bản release đã ký khi đã cấu hình đủ 3 secret bên dưới
       - name: Build signed release APK
         if: ${{ env.HAS_KEYSTORE == 'true' }}
         env:
@@ -105,7 +91,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Build release AAB (App Bundle cho Play Store)
+      - name: Build release AAB
         if: ${{ env.HAS_KEYSTORE == 'true' }}
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
@@ -118,11 +104,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: app/build/outputs/apk/release/*.apk
+          path: "**/build/outputs/apk/release/*.apk"
 
       - name: Upload release AAB
         if: ${{ env.HAS_KEYSTORE == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: app-release-bundle
-          path: app/build/outputs/bundle/release/*.aab
+          path: "**/build/outputs/bundle/release/*.aab"
