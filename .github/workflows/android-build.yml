@@ -22,7 +22,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Giải nén và chuyển mã nguồn về thư mục gốc
+      # 1. Giải nén và chuyển toàn bộ mã nguồn về thư mục gốc chuẩn
       - name: Extract ZIP and flatten directory structure
         run: |
           find . -maxdepth 2 -name "*.zip" | while read -r file; do
@@ -73,10 +73,11 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
+      # 2. Xóa sạch cache lỗi và ép chạy không giao diện để tránh lỗi AWT KSP
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle clean assembleDebug --no-daemon --stacktrace -Djava.awt.headless=true
 
-      # Tìm và tải lên toàn bộ file .apk xuất ra
+      # 3. Quét tìm mọi ngóc ngách để đảm bảo file tải về hiện lên ở Artifacts
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -89,7 +90,7 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: gradle clean assembleRelease --no-daemon --stacktrace -Djava.awt.headless=true
 
       - name: Build release AAB
         if: ${{ env.HAS_KEYSTORE == 'true' }}
@@ -97,7 +98,7 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle bundleRelease --no-daemon --stacktrace
+        run: gradle clean bundleRelease --no-daemon --stacktrace -Djava.awt.headless=true
 
       - name: Upload release APK
         if: ${{ env.HAS_KEYSTORE == 'true' }}
