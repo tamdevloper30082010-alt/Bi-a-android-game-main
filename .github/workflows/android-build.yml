@@ -25,14 +25,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- BƯỚC MỚI THÊM: Tự động tìm và giải nén toàn bộ file .zip ---
-      - name: Extract ZIP files
+      # --- BƯỚC CẢI TIẾN: Giải nén và tự động chuẩn hóa cấu trúc thư mục ---
+      - name: Extract ZIP files and fix directory structure
         run: |
           find . -name "*.zip" | while read -r file; do
             echo "Đang giải nén: $file..."
             unzip -o "$file" -d "$(dirname "$file")"
           done
-      # ----------------------------------------------------------------
+          
+          # Tìm thư mục thực sự chứa dự án Android (chứa file build.gradle)
+          GRADLE_DIR=$(dirname "$(find . -name "build.gradle" -o -name "build.gradle.kts" | head -n 1)")
+          
+          # Nếu tìm thấy mã nguồn nằm trong thư mục con, di chuyển tất cả ra thư mục gốc
+          if [ -n "$GRADLE_DIR" ] && [ "$GRADLE_DIR" != "." ]; then
+            echo "Phát hiện mã nguồn bị lồng trong thư mục con: $GRADLE_DIR"
+            echo "Đang di chuyển toàn bộ file ra thư mục gốc..."
+            # Di chuyển cả file thường và file ẩn (như .git, .gradle)
+            mv "$GRADLE_DIR"/* "$GRADLE_DIR"/.* . 2>/dev/null || true
+          else
+            echo "Cấu trúc thư mục đã chuẩn, không cần di chuyển."
+          fi
+      # ----------------------------------------------------------------------
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
